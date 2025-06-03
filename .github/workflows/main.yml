@@ -1,0 +1,125 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ master ]
+    tags: [ 'v*' ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        
+    - name: Cache Gradle packages
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+          
+    - name: Make gradlew executable
+      run: chmod +x ./gradlew
+      
+    - name: Build with Gradle
+      run: ./gradlew build
+      
+    - name: Test mod
+      run: ./gradlew test
+      
+    - name: Get mod version
+      id: version
+      run: |
+        VERSION=$(./gradlew properties -q | grep "^version:" | awk '{print $2}')
+        echo "mod_version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Detected version: $VERSION"
+        
+    - name: Get mod name
+      id: modname
+      run: |
+        MOD_NAME=$(./gradlew properties -q | grep "^archivesBaseName:" | awk '{print $2}' || echo "gea")
+        echo "mod_name=$MOD_NAME" >> $GITHUB_OUTPUT
+        echo "Detected mod name: $MOD_NAME"
+        
+    - name: Find JAR file
+      id: jar
+      run: |
+        JAR_PATH=$(find build/libs -name "*.jar" -not -name "*-sources.jar" -not -name "*-dev.jar" | head -1)
+        JAR_NAME=$(basename "$JAR_PATH")
+        echo "jar_path=$JAR_PATH" >> $GITHUB_OUTPUT
+        echo "jar_name=$JAR_NAME" >> $GITHUB_OUTPUT
+        echo "Found JAR: $JAR_PATH"
+        
+    - name: Create Release Tag
+      id: tag
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+        else
+          TAG_NAME="v${{ steps.version.outputs.mod_version }}-$(date +'%Y%m%d-%H%M%S')"
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git tag $TAG_NAME
+          git push origin $TAG_NAME
+        fi
+        echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+        echo "Release tag: $TAG_NAME"
+        
+    - name: Generate changelog
+      id: changelog
+      run: |
+        CHANGELOG=$(git log --oneline --pretty=format:"- %s" -10 | head -20)
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.tag.outputs.tag_name }}
+        name: "${{ steps.modname.outputs.mod_name }} v${{ steps.version.outputs.mod_version }}"
+        body: |
+          ## 🍇 Grapes Eating Animation v${{ steps.version.outputs.mod_version }}
+          
+          **Minecraft Version:** 1.20.1  
+          **Forge Version:** 47.2.0  
+          
+          ### 📥 Installation
+          1. Install Minecraft Forge 47.2.0 or later
+          2. Download the JAR file below
+          3. Place it in your `mods` folder
+          4. Launch Minecraft!
+          
+          ### 🔄 Recent Changes
+          ${{ steps.changelog.outputs.changelog }}
+          
+          ### 📁 Files
+          - **${{ steps.jar.outputs.jar_name }}** - Main mod file for Minecraft 1.20.1
+          
+          ---
+          *Built automatically from commit ${{ github.sha }}*
+        files: |
+          ${{ steps.jar.outputs.jar_path }}
+        draft: false
+        prerelease: false
+        generate_release_notes: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: mod-jar
+        path: ${{ steps.jar.outputs.jar_path }}
+        retention-days: 30
