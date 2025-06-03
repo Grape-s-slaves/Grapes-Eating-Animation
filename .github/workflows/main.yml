@@ -20,7 +20,7 @@ jobs:
         distribution: 'temurin'
         
     - name: Cache Gradle packages
-      uses: actions/cache@v3
+      uses: actions/cache@v4  # Updated from v3
       with:
         path: |
           ~/.gradle/caches
@@ -85,7 +85,7 @@ jobs:
         echo "EOF" >> $GITHUB_OUTPUT
         
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2  # Updated from v1
       with:
         tag_name: ${{ steps.tag.outputs.tag_name }}
         name: "${{ steps.modname.outputs.mod_name }} v${{ steps.version.outputs.mod_version }}"
@@ -118,7 +118,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4  # Updated from v3
       with:
         name: mod-jar
         path: ${{ steps.jar.outputs.jar_path }}
