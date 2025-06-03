@@ -75,6 +75,8 @@ jobs:
         fi
         echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
         echo "Release tag: $TAG_NAME"
+      env:
+        GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
         
     - name: Generate changelog
       id: changelog
