@@ -16,7 +16,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Fetch full history to compare versions
+        fetch-depth: 0
         
     - name: Check version changes
       id: version_check
