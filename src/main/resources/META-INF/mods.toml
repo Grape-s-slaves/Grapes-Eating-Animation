@@ -1,0 +1,31 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="MIT"
+
+[[mods]]
+modId="gea"
+version="1.0.0"
+displayName="Grape's Eating Animation"
+description='''
+An API mod that adds customizable eating animations to food items.
+Animations are loaded from resource packs and configured via JSON.
+'''
+authors="Grape, Fly"
+credits=""
+logoFile="logo.png"
+updateJSONURL=""
+displayURL="https://www.youtube.com/watch?v=xvFZjo5PgG0"
+
+[[dependencies.gea]]
+modId="forge"
+mandatory=true
+versionRange="[47.2.0,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.gea]]
+modId="minecraft"
+mandatory=true
+versionRange="[1.20.1]"
+ordering="NONE"
+side="BOTH"
