@@ -6,8 +6,59 @@ on:
     tags: [ 'v*' ]
 
 jobs:
-  build:
+  check-version:
     runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.version_check.outputs.should_build }}
+      current_version: ${{ steps.version_check.outputs.current_version }}
+      
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch full history to compare versions
+        
+    - name: Check version changes
+      id: version_check
+      run: |
+        # Extract current version from mods.toml
+        if [ -f "src/main/resources/META-INF/mods.toml" ]; then
+          CURRENT_VERSION=$(grep -E '^version\s*=' src/main/resources/META-INF/mods.toml | sed -E 's/^version\s*=\s*"([^"]+)".*/\1/')
+        else
+          echo "mods.toml not found, checking build.gradle"
+          CURRENT_VERSION=$(./gradlew properties -q | grep "^version:" | awk '{print $2}' 2>/dev/null || echo "1.0.0")
+        fi
+        
+        echo "Current version: $CURRENT_VERSION"
+        echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+        
+        # Check if this is a tag push (always build for tags)
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          echo "Tag push detected, building release"
+          echo "should_build=true" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Get the latest release version from GitHub
+        LATEST_RELEASE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          "https://api.github.com/repos/${{ github.repository }}/releases/latest" | \
+          jq -r '.tag_name // "v0.0.0"' | sed 's/^v//')
+          
+        echo "Latest release version: $LATEST_RELEASE"
+        
+        # Compare versions
+        if [ "$CURRENT_VERSION" != "$LATEST_RELEASE" ]; then
+          echo "Version changed from $LATEST_RELEASE to $CURRENT_VERSION"
+          echo "should_build=true" >> $GITHUB_OUTPUT
+        else
+          echo "Version unchanged ($CURRENT_VERSION), skipping build"
+          echo "should_build=false" >> $GITHUB_OUTPUT
+        fi
+
+  build:
+    needs: check-version
+    runs-on: ubuntu-latest
+    if: needs.check-version.outputs.should_build == 'true'
     
     steps:
     - name: Checkout repository
@@ -41,9 +92,10 @@ jobs:
     - name: Get mod version
       id: version
       run: |
-        VERSION=$(./gradlew properties -q | grep "^version:" | awk '{print $2}')
+        # Use the version from the check job
+        VERSION="${{ needs.check-version.outputs.current_version }}"
         echo "mod_version=$VERSION" >> $GITHUB_OUTPUT
-        echo "Detected version: $VERSION"
+        echo "Using version: $VERSION"
         
     - name: Get mod name
       id: modname
@@ -125,3 +177,15 @@ jobs:
         name: mod-jar
         path: ${{ steps.jar.outputs.jar_path }}
         retention-days: 30
+
+  skip-notification:
+    needs: check-version
+    runs-on: ubuntu-latest
+    if: needs.check-version.outputs.should_build == 'false'
+    
+    steps:
+    - name: Skip build notification
+      run: |
+        echo "🚫 Build skipped - Version unchanged"
+        echo "Current version: ${{ needs.check-version.outputs.current_version }}"
+        echo "No new release will be created."
