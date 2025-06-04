@@ -23,26 +23,25 @@ import net.minecraftforge.registries.ForgeRegistries;
 import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 @OnlyIn(Dist.CLIENT)
 @Mod.EventBusSubscriber(modid = GrapesEatingAnimation.MODID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
 public class EatingItemModelOverride {
 
-    // Enhanced cache with size limits and access tracking
-    private static final int MAX_CACHE_SIZE = 100; // Configurable limit
+    private static final int MAX_CACHE_SIZE = 100;
+    private static final long CACHE_CLEANUP_INTERVAL = 30_000L; // 30 seconds
+    private static final long CACHE_ENTRY_TTL = 300_000L; // 5 minutes
+
+    private static final Pattern NAMESPACE_PATTERN = Pattern.compile("[a-z0-9_.-]+");
+    private static final Pattern PATH_PATTERN = Pattern.compile("[a-z0-9_./-]+");
+
     private static final ConcurrentHashMap<String, CachedModel> frameModelCache = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Long> accessTimes = new ConcurrentHashMap<>();
 
-    // Track access times for LRU eviction
-    private static final Map<String, Long> accessTimes = new ConcurrentHashMap<>();
-
-    // Cleanup timing
-    private static long lastCacheCleanup = 0;
-    private static final long CACHE_CLEANUP_INTERVAL = 30000; // 30 seconds
-    private static final long CACHE_ENTRY_TTL = 300000; // 5 minutes
-
+    private static volatile long lastCacheCleanup = 0;
     private static volatile boolean modelsRegistered = false;
 
-    // Wrapper class for cached models with metadata
     private static class CachedModel {
         final BakedModel model;
         final long cacheTime;
@@ -54,25 +53,29 @@ public class EatingItemModelOverride {
             this.lastAccessed = this.cacheTime;
         }
 
-        boolean isExpired() {
-            return System.currentTimeMillis() - cacheTime > CACHE_ENTRY_TTL;
+        boolean isExpired(long currentTime) {
+            return currentTime - cacheTime > CACHE_ENTRY_TTL;
         }
 
-        void updateAccess() {
-            this.lastAccessed = System.currentTimeMillis();
+        void updateAccess(long currentTime) {
+            this.lastAccessed = currentTime;
         }
     }
 
     @SubscribeEvent
     public static void onModelRegister(ModelEvent.RegisterAdditional event) {
         GrapesEatingAnimation.LOGGER.info("GEA: Registering additional models");
-
-        // Clear cache when models are being re-registered
         clearCache();
 
         try {
             Map<String, List<String>> animations = EatingAnimationConfig.getAllAnimations();
+            if (animations.isEmpty()) {
+                GrapesEatingAnimation.LOGGER.warn("GEA: No animations configured");
+                return;
+            }
+
             Set<String> registeredFrames = new HashSet<>();
+            int totalFrames = 0;
 
             for (Map.Entry<String, List<String>> entry : animations.entrySet()) {
                 String itemId = entry.getKey();
@@ -89,36 +92,43 @@ public class EatingItemModelOverride {
                         continue;
                     }
 
-                    if (!registeredFrames.contains(frameName)) {
-                        try {
-                            if (!isValidResourceLocation(frameName)) {
-                                GrapesEatingAnimation.LOGGER.warn("GEA: Invalid ResourceLocation format: {}", frameName);
-                                continue;
-                            }
-
-                            ResourceLocation frameLocation = new ResourceLocation(frameName);
-                            ModelResourceLocation frameModelLocation = new ModelResourceLocation(
-                                    frameLocation.getNamespace(),
-                                    frameLocation.getPath(),
-                                    "inventory"
-                            );
-
-                            event.register(frameModelLocation);
-                            registeredFrames.add(frameName);
-                            GrapesEatingAnimation.LOGGER.debug("GEA: Registered frame model: {}", frameModelLocation);
-
-                        } catch (Exception e) {
-                            GrapesEatingAnimation.LOGGER.warn("GEA: Failed to register frame model '{}' for item '{}': {}",
-                                    frameName, itemId, e.getMessage());
+                    if (registeredFrames.add(frameName)) {
+                        if (registerFrameModel(event, frameName)) {
+                            totalFrames++;
                         }
                     }
                 }
             }
 
-            GrapesEatingAnimation.LOGGER.info("GEA: Successfully registered {} unique frame models", registeredFrames.size());
+            GrapesEatingAnimation.LOGGER.info("GEA: Successfully registered {} unique frame models for {} items",
+                    totalFrames, animations.size());
 
         } catch (Exception e) {
             GrapesEatingAnimation.LOGGER.error("GEA: Critical error during model registration", e);
+        }
+    }
+
+    private static boolean registerFrameModel(ModelEvent.RegisterAdditional event, String frameName) {
+        try {
+            if (!isValidResourceLocation(frameName)) {
+                GrapesEatingAnimation.LOGGER.warn("GEA: Invalid ResourceLocation format: {}", frameName);
+                return false;
+            }
+
+            ResourceLocation frameLocation = new ResourceLocation(frameName);
+            ModelResourceLocation frameModelLocation = new ModelResourceLocation(
+                    frameLocation.getNamespace(),
+                    frameLocation.getPath(),
+                    "inventory"
+            );
+
+            event.register(frameModelLocation);
+            GrapesEatingAnimation.LOGGER.debug("GEA: Registered frame model: {}", frameModelLocation);
+            return true;
+
+        } catch (Exception e) {
+            GrapesEatingAnimation.LOGGER.warn("GEA: Failed to register frame model '{}': {}", frameName, e.getMessage());
+            return false;
         }
     }
 
@@ -128,8 +138,6 @@ public class EatingItemModelOverride {
 
         try {
             Map<ResourceLocation, BakedModel> modelRegistry = event.getModels();
-
-            // Clear cache when models are rebaked (resource pack reload)
             clearCache();
             modelsRegistered = true;
 
@@ -138,26 +146,8 @@ public class EatingItemModelOverride {
 
             int successCount = 0;
             for (String itemKey : animations.keySet()) {
-                try {
-                    if (!isValidResourceLocation(itemKey)) {
-                        GrapesEatingAnimation.LOGGER.warn("GEA: Invalid item ResourceLocation: {}", itemKey);
-                        continue;
-                    }
-
-                    ResourceLocation itemId = new ResourceLocation(itemKey);
-                    ModelResourceLocation modelLocation = new ModelResourceLocation(itemId, "inventory");
-
-                    BakedModel originalModel = modelRegistry.get(modelLocation);
-                    if (originalModel != null) {
-                        BakedModel wrappedModel = new EatingAnimatedBakedModel(originalModel, itemId);
-                        modelRegistry.put(modelLocation, wrappedModel);
-                        successCount++;
-                        GrapesEatingAnimation.LOGGER.debug("GEA: Wrapped model for item: {}", itemId);
-                    } else {
-                        GrapesEatingAnimation.LOGGER.warn("GEA: Could not find original model for item: {}", itemId);
-                    }
-                } catch (Exception e) {
-                    GrapesEatingAnimation.LOGGER.warn("GEA: Failed to wrap model for item '{}': {}", itemKey, e.getMessage());
+                if (wrapItemModel(modelRegistry, itemKey)) {
+                    successCount++;
                 }
             }
 
@@ -168,7 +158,32 @@ public class EatingItemModelOverride {
         }
     }
 
-    // Enhanced cache management methods
+    private static boolean wrapItemModel(Map<ResourceLocation, BakedModel> modelRegistry, String itemKey) {
+        try {
+            if (!isValidResourceLocation(itemKey)) {
+                GrapesEatingAnimation.LOGGER.warn("GEA: Invalid item ResourceLocation: {}", itemKey);
+                return false;
+            }
+
+            ResourceLocation itemId = new ResourceLocation(itemKey);
+            ModelResourceLocation modelLocation = new ModelResourceLocation(itemId, "inventory");
+
+            BakedModel originalModel = modelRegistry.get(modelLocation);
+            if (originalModel != null) {
+                BakedModel wrappedModel = new EatingAnimatedBakedModel(originalModel, itemId);
+                modelRegistry.put(modelLocation, wrappedModel);
+                GrapesEatingAnimation.LOGGER.debug("GEA: Wrapped model for item: {}", itemId);
+                return true;
+            } else {
+                GrapesEatingAnimation.LOGGER.warn("GEA: Could not find original model for item: {}", itemId);
+                return false;
+            }
+        } catch (Exception e) {
+            GrapesEatingAnimation.LOGGER.warn("GEA: Failed to wrap model for item '{}': {}", itemKey, e.getMessage());
+            return false;
+        }
+    }
+
     public static void clearCache() {
         frameModelCache.clear();
         accessTimes.clear();
@@ -184,37 +199,69 @@ public class EatingItemModelOverride {
 
         lastCacheCleanup = currentTime;
 
-        // Remove expired entries
+        int expiredCount = removeExpiredEntries(currentTime);
+
+        int removedLRU = removeLRUEntries();
+
+        if (expiredCount > 0 || removedLRU > 0) {
+            GrapesEatingAnimation.LOGGER.debug("GEA: Cache cleanup - removed {} expired, {} LRU entries. Cache size: {}",
+                    expiredCount, removedLRU, frameModelCache.size());
+        }
+    }
+
+    private static int removeExpiredEntries(long currentTime) {
         int expiredCount = 0;
         Iterator<Map.Entry<String, CachedModel>> iterator = frameModelCache.entrySet().iterator();
+
         while (iterator.hasNext()) {
             Map.Entry<String, CachedModel> entry = iterator.next();
-            if (entry.getValue().isExpired()) {
+            if (entry.getValue().isExpired(currentTime)) {
                 iterator.remove();
                 accessTimes.remove(entry.getKey());
                 expiredCount++;
             }
         }
 
-        // If cache is still too large, remove LRU entries
-        int removedLRU = 0;
-        if (frameModelCache.size() > MAX_CACHE_SIZE) {
-            List<Map.Entry<String, Long>> sortedByAccess = new ArrayList<>(accessTimes.entrySet());
-            sortedByAccess.sort(Map.Entry.comparingByValue());
+        return expiredCount;
+    }
 
-            int toRemove = frameModelCache.size() - MAX_CACHE_SIZE;
-            for (int i = 0; i < toRemove && i < sortedByAccess.size(); i++) {
-                String key = sortedByAccess.get(i).getKey();
-                frameModelCache.remove(key);
+    private static int removeLRUEntries() {
+        if (frameModelCache.size() <= MAX_CACHE_SIZE) {
+            return 0;
+        }
+
+        List<Map.Entry<String, Long>> sortedByAccess = new ArrayList<>(accessTimes.entrySet());
+        sortedByAccess.sort(Map.Entry.comparingByValue());
+
+        int toRemove = frameModelCache.size() - MAX_CACHE_SIZE;
+        int removedCount = 0;
+
+        for (int i = 0; i < toRemove && i < sortedByAccess.size(); i++) {
+            String key = sortedByAccess.get(i).getKey();
+            if (frameModelCache.remove(key) != null) {
                 accessTimes.remove(key);
-                removedLRU++;
+                removedCount++;
             }
         }
 
-        if (expiredCount > 0 || removedLRU > 0) {
-            GrapesEatingAnimation.LOGGER.debug("GEA: Cache cleanup - removed {} expired, {} LRU entries. Cache size: {}",
-                    expiredCount, removedLRU, frameModelCache.size());
+        return removedCount;
+    }
+
+    private static boolean isValidResourceLocation(String location) {
+        if (location == null || location.trim().isEmpty()) {
+            return false;
         }
+
+        int colonIndex = location.indexOf(':');
+        if (colonIndex <= 0 || colonIndex >= location.length() - 1) {
+            return false;
+        }
+
+        String namespace = location.substring(0, colonIndex);
+        String path = location.substring(colonIndex + 1);
+
+        return NAMESPACE_PATTERN.matcher(namespace).matches() &&
+                PATH_PATTERN.matcher(path).matches();
     }
 
     public static CacheStats getCacheStats() {
@@ -229,28 +276,20 @@ public class EatingItemModelOverride {
         public final int currentSize;
         public final int maxSize;
         public final long timeSinceLastCleanup;
+        public final double loadFactor;
 
         CacheStats(int currentSize, int maxSize, long timeSinceLastCleanup) {
             this.currentSize = currentSize;
             this.maxSize = maxSize;
             this.timeSinceLastCleanup = timeSinceLastCleanup;
-        }
-    }
-
-    private static boolean isValidResourceLocation(String location) {
-        if (location == null || location.trim().isEmpty()) {
-            return false;
+            this.loadFactor = maxSize > 0 ? (double) currentSize / maxSize : 0.0;
         }
 
-        String[] parts = location.split(":", 2);
-        if (parts.length != 2) {
-            return false;
+        @Override
+        public String toString() {
+            return String.format("CacheStats{size=%d/%d (%.1f%%), lastCleanup=%dms ago}",
+                    currentSize, maxSize, loadFactor * 100, timeSinceLastCleanup);
         }
-
-        String namespace = parts[0];
-        String path = parts[1];
-
-        return namespace.matches("[a-z0-9_.-]+") && path.matches("[a-z0-9_.//-]+");
     }
 
     private static class EatingAnimatedBakedModel implements BakedModel {
@@ -269,7 +308,6 @@ public class EatingItemModelOverride {
             return itemOverrides;
         }
 
-        // Delegate all other methods to the original model
         @Override
         public List<net.minecraft.client.renderer.block.model.BakedQuad> getQuads(@Nullable BlockState state, @Nullable Direction side, RandomSource rand) {
             return originalModel.getQuads(state, side, rand);
@@ -317,57 +355,60 @@ public class EatingItemModelOverride {
 
         @Override
         public BakedModel resolve(BakedModel model, ItemStack stack, @Nullable ClientLevel world, @Nullable LivingEntity entity, int seed) {
-            // Perform periodic cache cleanup
-            performCacheCleanup();
-
-            if (!modelsRegistered) {
+            if (!modelsRegistered || !(entity instanceof Player)) {
                 return originalOverrides.resolve(model, stack, world, entity, seed);
             }
 
-            // FIXED: Only apply animation if this specific item stack is the one being eaten
-            if (entity instanceof Player) {
-                Player player = (Player) entity;
+            performCacheCleanup();
 
-                // Check if this specific item matches the one we're handling animations for
-                if (itemMatches(stack, itemId)) {
-                    try {
-                        EatingAnimationHandler.EatingAnimationState state = EatingAnimationHandler.getAnimationState(player);
+            Player player = (Player) entity;
 
-                        // CRITICAL FIX: Only apply animation if:
-                        // 1. Player has an active animation state
-                        // 2. Player is currently using an item
-                        // 3. The item being used matches this specific item type
-                        // 4. The ItemStack being rendered is actually the one being consumed
-                        if (state != null && player.isUsingItem()) {
-                            ItemStack currentlyUsing = player.getUseItem();
-
-                            // KEY FIX: Check if this specific ItemStack is the one being consumed
-                            // This prevents multiple items of the same type from showing animation
-                            if (!currentlyUsing.isEmpty() &&
-                                    itemMatches(currentlyUsing, itemId) &&
-                                    isTheSameItemStack(stack, currentlyUsing, player)) {
-
-                                String currentFrame = state.getCurrentFrame(player);
-                                if (currentFrame != null) {
-                                    BakedModel frameModel = resolveFrameModelCached(currentFrame);
-                                    if (frameModel != null) {
-                                        GrapesEatingAnimation.LOGGER.debug("GEA: Using frame model: {} for player: {} eating {}",
-                                                currentFrame, player.getName().getString(), itemId);
-                                        return frameModel;
-                                    } else {
-                                        GrapesEatingAnimation.LOGGER.debug("GEA: Frame model not available: {}", currentFrame);
-                                    }
-                                }
-                            }
-                        }
-                    } catch (Exception e) {
-                        GrapesEatingAnimation.LOGGER.warn("GEA: Error during model resolution for player {}: {}",
-                                player.getName().getString(), e.getMessage());
-                    }
-                }
+            if (!itemMatches(stack, itemId)) {
+                return originalOverrides.resolve(model, stack, world, entity, seed);
             }
 
-            return originalOverrides.resolve(model, stack, world, entity, seed);
+            try {
+                BakedModel animatedModel = resolveAnimatedModel(player, stack);
+                return animatedModel != null ? animatedModel : originalOverrides.resolve(model, stack, world, entity, seed);
+            } catch (Exception e) {
+                GrapesEatingAnimation.LOGGER.warn("GEA: Error during model resolution for player {}: {}",
+                        player.getName().getString(), e.getMessage());
+                return originalOverrides.resolve(model, stack, world, entity, seed);
+            }
+        }
+
+        @Nullable
+        private BakedModel resolveAnimatedModel(Player player, ItemStack stack) {
+            if (!player.isUsingItem()) {
+                return null;
+            }
+
+            ItemStack currentlyUsing = player.getUseItem();
+            if (currentlyUsing.isEmpty() || !itemMatches(currentlyUsing, itemId)) {
+                return null;
+            }
+
+            if (!isTheSameItemStack(stack, currentlyUsing, player)) {
+                return null;
+            }
+
+            EatingAnimationHandler.EatingAnimationState state = EatingAnimationHandler.getAnimationState(player);
+            if (state == null) {
+                return null;
+            }
+
+            String currentFrame = state.getCurrentFrame(player);
+            if (currentFrame == null) {
+                return null;
+            }
+
+            BakedModel frameModel = resolveFrameModelCached(currentFrame);
+            if (frameModel != null) {
+                GrapesEatingAnimation.LOGGER.debug("GEA: Using frame model: {} for player: {} eating {}",
+                        currentFrame, player.getName().getString(), itemId);
+            }
+
+            return frameModel;
         }
 
         private boolean itemMatches(ItemStack stack, ResourceLocation expectedId) {
@@ -380,39 +421,32 @@ public class EatingItemModelOverride {
             }
         }
 
-        /**
-         * Determines if the ItemStack being rendered is the same one being consumed.
-         * This is the key fix - we need to identify which specific ItemStack is being eaten.
-         */
         private boolean isTheSameItemStack(ItemStack stackBeingRendered, ItemStack stackBeingConsumed, Player player) {
-            // Method 1: Check if it's in the main hand (most common case)
-            if (player.getMainHandItem() == stackBeingConsumed) {
-                // If the stack being rendered is also the main hand item, it's the same
-                return stackBeingRendered == player.getMainHandItem();
-            }
-
-            // Method 2: Check if it's in the off hand
-            if (player.getOffhandItem() == stackBeingConsumed) {
-                return stackBeingRendered == player.getOffhandItem();
-            }
-
-            // Method 3: For other cases (like rendering in inventory), we can use additional checks
-            // This is a fallback - in most cases, the above checks should work
-
-            // If we can't determine definitively, we'll be conservative and not show animation
-            // for items that aren't in the active hand positions
-            return false;
+            return stackBeingRendered == player.getMainHandItem() && stackBeingConsumed == player.getMainHandItem() ||
+                    stackBeingRendered == player.getOffhandItem() && stackBeingConsumed == player.getOffhandItem();
         }
 
+        @Nullable
         private BakedModel resolveFrameModelCached(String frameName) {
-            // Check cache first and update access time
+            long currentTime = System.currentTimeMillis();
+
             CachedModel cached = frameModelCache.get(frameName);
-            if (cached != null && !cached.isExpired()) {
-                cached.updateAccess();
+            if (cached != null && !cached.isExpired(currentTime)) {
+                cached.updateAccess(currentTime);
                 accessTimes.put(frameName, cached.lastAccessed);
                 return cached.model;
             }
 
+            BakedModel frameModel = loadFrameModel(frameName);
+            if (frameModel != null) {
+                cacheFrameModel(frameName, frameModel, currentTime);
+            }
+
+            return frameModel;
+        }
+
+        @Nullable
+        private BakedModel loadFrameModel(String frameName) {
             try {
                 if (!isValidResourceLocation(frameName)) {
                     GrapesEatingAnimation.LOGGER.debug("GEA: Invalid frame ResourceLocation: {}", frameName);
@@ -426,8 +460,6 @@ public class EatingItemModelOverride {
                         "inventory"
                 );
 
-                GrapesEatingAnimation.LOGGER.debug("GEA: Looking for frame model at: {}", frameModelLocation);
-
                 Minecraft minecraft = Minecraft.getInstance();
                 if (minecraft.getModelManager() == null) {
                     GrapesEatingAnimation.LOGGER.debug("GEA: Model manager not available");
@@ -438,26 +470,28 @@ public class EatingItemModelOverride {
                 BakedModel missingModel = minecraft.getModelManager().getMissingModel();
 
                 if (frameModel != null && frameModel != missingModel) {
-                    // Cache the successful result with size limit check
-                    if (frameModelCache.size() >= MAX_CACHE_SIZE) {
-                        performCacheCleanup(); // Force cleanup if at limit
-                    }
-
-                    if (frameModelCache.size() < MAX_CACHE_SIZE) {
-                        CachedModel cachedModel = new CachedModel(frameModel);
-                        frameModelCache.put(frameName, cachedModel);
-                        accessTimes.put(frameName, cachedModel.lastAccessed);
-                        GrapesEatingAnimation.LOGGER.debug("GEA: Successfully found and cached frame model");
-                    }
-
+                    GrapesEatingAnimation.LOGGER.debug("GEA: Successfully loaded frame model: {}", frameModelLocation);
                     return frameModel;
                 } else {
-                    GrapesEatingAnimation.LOGGER.debug("GEA: Frame model not found or is missing model: {}", frameModelLocation);
+                    GrapesEatingAnimation.LOGGER.debug("GEA: Frame model not found: {}", frameModelLocation);
                     return null;
                 }
             } catch (Exception e) {
-                GrapesEatingAnimation.LOGGER.warn("GEA: Error resolving frame model for {}: {}", frameName, e.getMessage());
+                GrapesEatingAnimation.LOGGER.warn("GEA: Error loading frame model for {}: {}", frameName, e.getMessage());
                 return null;
+            }
+        }
+
+        private void cacheFrameModel(String frameName, BakedModel frameModel, long currentTime) {
+            if (frameModelCache.size() >= MAX_CACHE_SIZE) {
+                performCacheCleanup();
+            }
+
+            if (frameModelCache.size() < MAX_CACHE_SIZE) {
+                CachedModel cachedModel = new CachedModel(frameModel);
+                frameModelCache.put(frameName, cachedModel);
+                accessTimes.put(frameName, currentTime);
+                GrapesEatingAnimation.LOGGER.debug("GEA: Cached frame model: {}", frameName);
             }
         }
     }

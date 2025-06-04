@@ -17,7 +17,6 @@ import java.util.concurrent.ConcurrentHashMap;
 @Mod.EventBusSubscriber(modid = GrapesEatingAnimation.MODID)
 public class ServerEventHandler {
 
-    // Track eating state on server side
     private static final ConcurrentHashMap<Player, EatingState> serverEatingStates = new ConcurrentHashMap<>();
 
     @SubscribeEvent
@@ -38,11 +37,9 @@ public class ServerEventHandler {
             return;
         }
 
-        // Track eating state
         EatingState state = new EatingState(itemId.toString(), itemStack.getUseDuration(), player.tickCount);
         serverEatingStates.put(player, state);
 
-        // Send packet to all nearby players
         NetworkHandler.EatingAnimationPacket packet = new NetworkHandler.EatingAnimationPacket(
                 player.getId(),
                 itemId.toString(),
@@ -90,13 +87,11 @@ public class ServerEventHandler {
         EatingState state = serverEatingStates.get(player);
 
         if (state != null) {
-            // Check if player is still eating
             if (!player.isUsingItem() || !player.getUseItem().isEdible()) {
                 stopEatingAnimation(player);
                 return;
             }
 
-            // Check if animation has expired
             int elapsedTicks = player.tickCount - state.startTick;
             if (elapsedTicks >= state.duration) {
                 stopEatingAnimation(player);
@@ -116,7 +111,6 @@ public class ServerEventHandler {
     private static void stopEatingAnimation(ServerPlayer player) {
         EatingState state = serverEatingStates.remove(player);
         if (state != null) {
-            // Send stop packet to all nearby players
             NetworkHandler.EatingAnimationPacket packet = new NetworkHandler.EatingAnimationPacket(
                     player.getId(),
                     null,

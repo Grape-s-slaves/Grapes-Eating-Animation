@@ -37,16 +37,15 @@ public class GeaDebugCommands {
                 .then(Commands.literal("reload")
                         .executes(GeaDebugCommands::reloadConfig))
                 .then(Commands.literal("info")
-                        .executes(GeaDebugCommands::showOwnPlayerInfo) // Show own info when no argument
+                        .executes(GeaDebugCommands::showOwnPlayerInfo)
                         .then(Commands.argument("player", EntityArgument.player())
-                                .executes(GeaDebugCommands::showTargetPlayerInfo))) // Show target player info
+                                .executes(GeaDebugCommands::showTargetPlayerInfo)))
         );
 
         GrapesEatingAnimation.LOGGER.info("GEA: Registered debug commands");
     }
 
     private static int showAnimationsCount(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-        // Check if player is in creative mode
         if (!isCreativeMode(context)) {
             context.getSource().sendFailure(Component.literal("§cThis command only works in Creative mode!"));
             return 0;
@@ -60,7 +59,6 @@ public class GeaDebugCommands {
                 false
         );
 
-        // Show detailed info if there are animations
         if (count > 0) {
             context.getSource().sendSuccess(
                     () -> Component.literal("§7Animated items:"),
@@ -81,7 +79,6 @@ public class GeaDebugCommands {
     }
 
     private static int giveLoadedItems(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-        // Check if player is in creative mode
         if (!isCreativeMode(context)) {
             context.getSource().sendFailure(Component.literal("§cThis command only works in Creative mode!"));
             return 0;
@@ -104,9 +101,8 @@ public class GeaDebugCommands {
                 Item item = ForgeRegistries.ITEMS.getValue(itemId);
 
                 if (item != null) {
-                    ItemStack stack = new ItemStack(item, 64); // Give a full stack
+                    ItemStack stack = new ItemStack(item, 1);
 
-                    // Only give edible items (since that's what the animation is for)
                     if (stack.isEdible()) {
                         player.getInventory().add(stack);
                         itemsGiven++;
@@ -124,7 +120,6 @@ public class GeaDebugCommands {
             }
         }
 
-        // Create final copies for use in lambdas
         final int finalItemsGiven = itemsGiven;
         final int finalItemsFailed = itemsFailed;
 
@@ -146,7 +141,6 @@ public class GeaDebugCommands {
     }
 
     private static int reloadConfig(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-        // Check if player is in creative mode
         if (!isCreativeMode(context)) {
             context.getSource().sendFailure(Component.literal("§cThis command only works in Creative mode!"));
             return 0;
@@ -172,7 +166,6 @@ public class GeaDebugCommands {
     }
 
     private static int showOwnPlayerInfo(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-        // Check if player is in creative mode
         if (!isCreativeMode(context)) {
             context.getSource().sendFailure(Component.literal("§cThis command only works in Creative mode!"));
             return 0;
@@ -183,7 +176,6 @@ public class GeaDebugCommands {
     }
 
     private static int showTargetPlayerInfo(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-        // Check if player is in creative mode
         if (!isCreativeMode(context)) {
             context.getSource().sendFailure(Component.literal("§cThis command only works in Creative mode!"));
             return 0;
@@ -257,7 +249,6 @@ public class GeaDebugCommands {
             );
         }
 
-        // Show additional player state info
         context.getSource().sendSuccess(
                 () -> Component.literal("§7  - Tick count: §f" + player.tickCount),
                 false

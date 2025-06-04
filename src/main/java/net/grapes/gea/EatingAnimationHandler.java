@@ -7,8 +7,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.RenderHandEvent;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -19,43 +17,31 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @OnlyIn(Dist.CLIENT)
 public class EatingAnimationHandler {
-    // Enhanced animation state management
-    private static final int MAX_ANIMATION_STATES = 50; // Limit concurrent animations
+    private static final int MAX_ANIMATION_STATES = 50;
     private static final ConcurrentHashMap<Player, EatingAnimationState> activeAnimations = new ConcurrentHashMap<>();
 
-    // Enhanced cleanup timing
     private static long lastCleanupTime = 0;
-    private static final long CLEANUP_INTERVAL = 2000; // 2 seconds (more frequent)
-    private static final long STALE_THRESHOLD = 10000; // 10 seconds for stale detection
+    private static final long CLEANUP_INTERVAL = 2000; // 2 seconds
+    private static final long STALE_THRESHOLD = 10000; // 10 seconds
 
-    // Performance monitoring
     private static int cleanupCount = 0;
-
-    public EatingAnimationHandler() {
-        MinecraftForge.EVENT_BUS.register(this);
-    }
 
     @SubscribeEvent
     public void onRenderHand(RenderHandEvent event) {
-        Player player = Minecraft.getInstance().player;
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player == null) {
+            return;
+        }
+
+        updateAnimationState(minecraft.player);
+        performEnhancedCleanup();
+    }
+
+    public static void updateAnimationState(Player player) {
         if (player == null) {
             return;
         }
 
-        updateAnimationState(player);
-        performEnhancedCleanup();
-    }
-
-    @SubscribeEvent
-    public void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
-        if (event.getEntity() instanceof Player) {
-            Player player = (Player) event.getEntity();
-            clearAnimationState(player);
-            GrapesEatingAnimation.LOGGER.debug("GEA: Cleaned up animation state for disconnected player");
-        }
-    }
-
-    public static void updateAnimationState(Player player) {
         ItemStack activeItem = player.getUseItem();
 
         if (activeItem.isEmpty()) {
@@ -89,11 +75,9 @@ public class EatingAnimationHandler {
 
         EatingAnimationState state = activeAnimations.computeIfAbsent(player,
                 k -> {
-                    // Check if we're at capacity
                     if (activeAnimations.size() >= MAX_ANIMATION_STATES) {
-                        performEnhancedCleanup(); // Force cleanup
+                        performEnhancedCleanup();
 
-                        // If still at capacity, remove oldest entry
                         if (activeAnimations.size() >= MAX_ANIMATION_STATES) {
                             removeOldestAnimation();
                         }
@@ -147,7 +131,6 @@ public class EatingAnimationHandler {
 
             boolean shouldRemove = false;
 
-            // Check various cleanup conditions
             if (player == null) {
                 shouldRemove = true;
             } else if (!player.isUsingItem()) {
@@ -157,7 +140,6 @@ public class EatingAnimationHandler {
             } else if (state.isStale(player, STALE_THRESHOLD)) {
                 shouldRemove = true;
             } else {
-                // Check if item still has animation config
                 ItemStack currentItem = player.getUseItem();
                 if (!currentItem.isEmpty()) {
                     ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(currentItem.getItem());
@@ -173,7 +155,7 @@ public class EatingAnimationHandler {
             }
         }
 
-        if (removedCount > 0 || cleanupCount % 10 == 0) { // Log periodically
+        if (removedCount > 0 || cleanupCount % 10 == 0) {
             GrapesEatingAnimation.LOGGER.debug("GEA: Enhanced cleanup #{} - removed {} stale entries. Active: {}/{}",
                     cleanupCount, removedCount, activeAnimations.size(), MAX_ANIMATION_STATES);
         }
@@ -194,7 +176,6 @@ public class EatingAnimationHandler {
         activeAnimations.remove(player);
     }
 
-    // Enhanced stats method
     public static AnimationStats getAnimationStats() {
         return new AnimationStats(
                 activeAnimations.size(),
@@ -222,7 +203,7 @@ public class EatingAnimationHandler {
         private final List<String> frames;
         private final int totalDurationTicks;
         private final int startTickCount;
-        private final long creationTime; // Add creation timestamp
+        private final long creationTime;
         private String lastFrame = null;
 
         public EatingAnimationState(ResourceLocation itemId, int useDuration, int startTick) {
@@ -236,12 +217,16 @@ public class EatingAnimationHandler {
         }
 
         public EatingAnimationState(ResourceLocation itemId, int useDuration) {
-            this(itemId, useDuration, Minecraft.getInstance().player != null ?
-                    Minecraft.getInstance().player.tickCount : 0);
+            this(itemId, useDuration, getClientPlayerTickCount());
+        }
+
+        private static int getClientPlayerTickCount() {
+            Minecraft minecraft = Minecraft.getInstance();
+            return minecraft.player != null ? minecraft.player.tickCount : 0;
         }
 
         public void update(Player player) {
-            // Update method for any per-tick updates
+            // Just reminder
         }
 
         public String getCurrentFrame(Player player) {
@@ -280,7 +265,8 @@ public class EatingAnimationHandler {
         }
 
         public String getCurrentFrame() {
-            return getCurrentFrame(Minecraft.getInstance().player);
+            Minecraft minecraft = Minecraft.getInstance();
+            return getCurrentFrame(minecraft.player);
         }
 
         public boolean isExpired(Player player) {
@@ -293,10 +279,10 @@ public class EatingAnimationHandler {
         }
 
         public boolean isExpired() {
-            return isExpired(Minecraft.getInstance().player);
+            Minecraft minecraft = Minecraft.getInstance();
+            return isExpired(minecraft.player);
         }
 
-        // New method to detect stale animations
         public boolean isStale(Player player, long staleThresholdMs) {
             if (player == null) {
                 return true;
@@ -322,7 +308,8 @@ public class EatingAnimationHandler {
         }
 
         public int getElapsedTicks() {
-            return getElapsedTicks(Minecraft.getInstance().player);
+            Minecraft minecraft = Minecraft.getInstance();
+            return getElapsedTicks(minecraft.player);
         }
 
         public long getCreationTime() {

@@ -1,7 +1,9 @@
 package net.grapes.gea;
 
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
@@ -21,16 +23,18 @@ public class GrapesEatingAnimation {
         var modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
 
         modEventBus.addListener(this::commonSetup);
-        modEventBus.addListener(this::clientSetup);
-        modEventBus.addListener(this::registerClientReloadListeners);
 
-        ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, EatingAnimationConfig.SPEC);
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
+            modEventBus.addListener(this::clientSetup);
+            modEventBus.addListener(this::registerClientReloadListeners);
+            ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, EatingAnimationConfig.SPEC);
+        });
+
         LOGGER.info("GEA: Mod initialization complete");
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
         LOGGER.info("GEA: Setting up common components");
-        // Register network handler
         NetworkHandler.register();
         LOGGER.info("GEA: Common setup complete");
     }

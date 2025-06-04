@@ -67,7 +67,6 @@ public class NetworkHandler {
         public static void handle(EatingAnimationPacket msg, Supplier<NetworkEvent.Context> contextSupplier) {
             NetworkEvent.Context context = contextSupplier.get();
             context.enqueueWork(() -> {
-                // Handle on client side
                 if (context.getDirection().getReceptionSide().isClient()) {
                     ClientNetworkHandler.handleEatingAnimationPacket(msg);
                 }
@@ -75,7 +74,6 @@ public class NetworkHandler {
             context.setPacketHandled(true);
         }
 
-        // Getters
         public int getPlayerId() { return playerId; }
         public String getItemId() { return itemId; }
         public int getUseDuration() { return useDuration; }

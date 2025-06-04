@@ -16,17 +16,22 @@ public class ClientNetworkHandler {
             return;
         }
 
-        // Find the player by ID - fixed to only call getEntity() once
-        Entity entity = minecraft.level.getEntity(packet.getPlayerId());
-        Player player = entity instanceof Player ? (Player) entity : null;
-
-        if (player == null) {
-            GrapesEatingAnimation.LOGGER.debug("GEA: Could not find player with ID {}", packet.getPlayerId());
+        Entity entity = null;
+        try {
+            entity = minecraft.level.getEntity(packet.getPlayerId());
+        } catch (Exception e) {
+            GrapesEatingAnimation.LOGGER.warn("GEA: Failed to get entity with ID {}: {}", packet.getPlayerId(), e.getMessage());
             return;
         }
 
+        if (!(entity instanceof Player)) {
+            GrapesEatingAnimation.LOGGER.debug("GEA: Entity with ID {} is not a player", packet.getPlayerId());
+            return;
+        }
+
+        Player player = (Player) entity;
+
         if (packet.isEating() && packet.getItemId() != null) {
-            // Start eating animation
             try {
                 ResourceLocation itemId = new ResourceLocation(packet.getItemId());
                 if (EatingAnimationConfig.hasAnimation(itemId)) {
@@ -41,7 +46,6 @@ public class ClientNetworkHandler {
                 GrapesEatingAnimation.LOGGER.warn("GEA: Failed to start eating animation: {}", e.getMessage());
             }
         } else {
-            // Stop eating animation
             EatingAnimationHandler.clearAnimationState(player);
             GrapesEatingAnimation.LOGGER.debug("GEA: Stopped eating animation for player {}",
                     player.getName().getString());
