@@ -1,10 +1,12 @@
 package net.grapes.gea;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -35,7 +37,9 @@ public class GeaDebugCommands {
                 .then(Commands.literal("reload")
                         .executes(GeaDebugCommands::reloadConfig))
                 .then(Commands.literal("info")
-                        .executes(GeaDebugCommands::showPlayerInfo))
+                        .executes(GeaDebugCommands::showOwnPlayerInfo) // Show own info when no argument
+                        .then(Commands.argument("player", EntityArgument.player())
+                                .executes(GeaDebugCommands::showTargetPlayerInfo))) // Show target player info
         );
 
         GrapesEatingAnimation.LOGGER.info("GEA: Registered debug commands");
@@ -167,7 +171,7 @@ public class GeaDebugCommands {
         }
     }
 
-    private static int showPlayerInfo(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+    private static int showOwnPlayerInfo(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         // Check if player is in creative mode
         if (!isCreativeMode(context)) {
             context.getSource().sendFailure(Component.literal("§cThis command only works in Creative mode!"));
@@ -175,9 +179,23 @@ public class GeaDebugCommands {
         }
 
         ServerPlayer player = context.getSource().getPlayerOrException();
+        return showPlayerInfo(context, player);
+    }
 
+    private static int showTargetPlayerInfo(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        // Check if player is in creative mode
+        if (!isCreativeMode(context)) {
+            context.getSource().sendFailure(Component.literal("§cThis command only works in Creative mode!"));
+            return 0;
+        }
+
+        ServerPlayer targetPlayer = EntityArgument.getPlayer(context, "player");
+        return showPlayerInfo(context, targetPlayer);
+    }
+
+    private static int showPlayerInfo(CommandContext<CommandSourceStack> context, ServerPlayer player) {
         context.getSource().sendSuccess(
-                () -> Component.literal("§aPlayer Debug Info:"),
+                () -> Component.literal("§aPlayer Debug Info for §f" + player.getName().getString() + "§a:"),
                 false
         );
 
@@ -205,6 +223,11 @@ public class GeaDebugCommands {
                     false
             );
 
+            context.getSource().sendSuccess(
+                    () -> Component.literal("§7  - Use duration remaining: §f" + player.getUseItemRemainingTicks()),
+                    false
+            );
+
             if (itemId != null) {
                 boolean hasAnimation = EatingAnimationConfig.hasAnimation(itemId);
                 context.getSource().sendSuccess(
@@ -218,9 +241,32 @@ public class GeaDebugCommands {
                             () -> Component.literal("§7  - Animation frames: §f" + (frames != null ? frames.size() : 0)),
                             false
                     );
+
+                    if (frames != null && !frames.isEmpty()) {
+                        context.getSource().sendSuccess(
+                                () -> Component.literal("§7  - Frame list: §f" + String.join(", ", frames)),
+                                false
+                        );
+                    }
                 }
             }
+        } else {
+            context.getSource().sendSuccess(
+                    () -> Component.literal("§7  - Player is not currently using any item"),
+                    false
+            );
         }
+
+        // Show additional player state info
+        context.getSource().sendSuccess(
+                () -> Component.literal("§7  - Tick count: §f" + player.tickCount),
+                false
+        );
+
+        context.getSource().sendSuccess(
+                () -> Component.literal("§7  - Game mode: §f" + player.gameMode.getGameModeForPlayer().getName()),
+                false
+        );
 
         return 1;
     }

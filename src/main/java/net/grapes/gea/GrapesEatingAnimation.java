@@ -6,6 +6,7 @@ import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
+import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -19,11 +20,19 @@ public class GrapesEatingAnimation {
         LOGGER.info("GEA: Initializing Grape's Eating Animation mod");
         var modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
 
+        modEventBus.addListener(this::commonSetup);
         modEventBus.addListener(this::clientSetup);
         modEventBus.addListener(this::registerClientReloadListeners);
 
         ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, EatingAnimationConfig.SPEC);
         LOGGER.info("GEA: Mod initialization complete");
+    }
+
+    private void commonSetup(final FMLCommonSetupEvent event) {
+        LOGGER.info("GEA: Setting up common components");
+        // Register network handler
+        NetworkHandler.register();
+        LOGGER.info("GEA: Common setup complete");
     }
 
     private void clientSetup(final FMLClientSetupEvent event) {
