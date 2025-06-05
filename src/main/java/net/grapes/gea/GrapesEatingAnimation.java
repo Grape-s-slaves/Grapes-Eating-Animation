@@ -42,6 +42,7 @@ public class GrapesEatingAnimation {
     private void clientSetup(final FMLClientSetupEvent event) {
         LOGGER.info("GEA: Setting up client-side components");
         MinecraftForge.EVENT_BUS.register(new EatingAnimationHandler());
+        ClientNetworkHandler.init();
         LOGGER.info("GEA: Client setup complete, registered EatingAnimationHandler");
     }
 
