@@ -1,3 +1,15 @@
+// TODO: Consider using player UUIDs instead of ServerPlayer instances as keys in ConcurrentHashMaps to avoid stale references and memory leaks.
+// TODO: Verify that cleaning up eating states on player respawn fully handles the case where player instances change.
+// TODO: Add handling for server tick resets or implement a more robust tick counter for synchronization logic.
+// TODO: Avoid potential duplicate packet sending by harmonizing performPeriodicSync and performFastSync or merging their logic.
+// TODO: Double-check if adding the center player to nearbyPlayers in getNearbyPlayers is intentional or should be excluded.
+// TODO: Optimize network packet sending by exploring batch or multicast sending if supported, instead of individual sends.
+// TODO: Add error handling around network packet sending to avoid exceptions if player disconnects mid-sync.
+// TODO: Store ResourceLocation directly in EatingState instead of String to avoid string comparison overhead and bugs.
+// TODO: Consider using player UUIDs for map keys to avoid issues with player instance identity after respawn.
+// TODO: Implement log rate limiting or toggleable debug logging to reduce log spam during high server activity.
+// TODO: Document or make sync interval and distance constants configurable for easier tuning.
+
 package net.grapes.gea;
 
 import net.minecraft.resources.ResourceLocation;
