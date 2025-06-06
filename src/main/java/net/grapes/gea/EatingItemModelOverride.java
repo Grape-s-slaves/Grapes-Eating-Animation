@@ -1,3 +1,14 @@
+// TODO: Consider making performCacheCleanup() run on a regular background thread or hook, not just on-demand.
+// TODO: Make performCacheCleanup() and related cache modification synchronized or atomic to prevent race conditions.
+// TODO: Simplify LRU eviction logic by using a LinkedHashMap with accessOrder=true and overriding removeEldestEntry.
+// TODO: Add more robust null-checks and fail-safe behavior around Minecraft.getModelManager() and its usage.
+// TODO: Validate if current NAMESPACE_PATTERN and PATH_PATTERN fully align with Minecraft's actual ResourceLocation parsing rules.
+// TODO: Reduce debug log spam—wrap verbose logs in a config flag or check for debug mode.
+// TODO: Consider wrapping more methods in EatingAnimatedBakedModel if visual inconsistencies appear in animated models.
+// TODO: Evaluate if cache stats (e.g. CacheStats) should track hits/misses for further tuning.
+// TODO: Add unit or integration tests for isValidResourceLocation(), wrapItemModel(), and cache eviction behavior.
+// TODO: Clear model cache (or rebuild) when ModelManager is reloaded due to resource pack changes.
+
 package net.grapes.gea;
 
 import net.minecraft.client.Minecraft;
