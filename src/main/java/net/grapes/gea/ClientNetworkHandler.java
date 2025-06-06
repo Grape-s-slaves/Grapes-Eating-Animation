@@ -1,3 +1,11 @@
+// TODO: Avoid double lookup of entity between handleEatingAnimationPacket and handleEatingAnimationPacketInternal
+// TODO: Consider making clientFullyInitialized and similar flags volatile or use Atomic types for safety
+// TODO: Extract magic numbers like timeout and maxAllowedDifference into named constants or config
+// TODO: Add guard to prevent excessively verbose logging in production environments
+// TODO: Investigate if returning true for non-Player entities is correct behavior (could suppress retry unnecessarily)
+// TODO: Consider basing timeout and timing logic on tickCount or a game-tick timer rather than System.currentTimeMillis()
+// TODO: Optionally, improve memory handling for delayedPackets by limiting queue size or handling repeated failures
+
 package net.grapes.gea;
 
 import net.minecraft.client.Minecraft;
