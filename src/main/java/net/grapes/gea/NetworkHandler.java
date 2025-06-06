@@ -1,3 +1,9 @@
+// TODO: Make packetId access thread-safe (e.g., use AtomicInteger or ensure it's only used on the mod loading thread).
+// TODO: Consider using ResourceLocation instead of String for itemId for better type safety and validation.
+// TODO: Add try-catch block in decode() method to safely handle corrupt/malformed packets.
+// TODO: Clarify or document behavior of encoding/decoding null itemId (empty string conversion).
+// TODO: Improve logging format for consistency and clarity (e.g., use [GEA] tag).
+
 package net.grapes.gea;
 
 import net.minecraft.network.FriendlyByteBuf;
