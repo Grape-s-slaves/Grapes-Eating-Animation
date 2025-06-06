@@ -1,3 +1,11 @@
+// TODO: Make animationMap thread-safe (e.g., use ConcurrentHashMap or synchronized blocks).
+// TODO: Catch and log JSON syntax errors specifically (JsonSyntaxException).
+// TODO: Consider backing up or resetting config if parsing fails instead of silently using an empty map.
+// TODO: Improve reloadConfig() to return success status or throw on failure for better UX integration.
+// TODO: Move default animations to an external resource file instead of hardcoding.
+// TODO: Add validation to loaded config (e.g., check for empty frame lists or bad keys).
+// TODO: If planning GUI integration, consider event-based updates when config reloads.
+
 package net.grapes.gea;
 
 import com.google.gson.Gson;
