@@ -1,3 +1,14 @@
+// TODO: Replace repeated isCreativeMode() checks with `.requires(source -> source.hasPermission(...) || isCreative(...))` in command registration.
+// TODO: Refactor command outputs to use Component styling APIs instead of raw '§' codes.
+// TODO: Add null check for `ForgeRegistries.ITEMS.getKey(...)` to prevent possible NPE.
+// TODO: Truncate or paginate frame list output if there are too many frames (e.g., limit to 10, add "…").
+// TODO: Fix misleading log message "Gave {} x64 to player" (you're only giving 1).
+// TODO: Consider moving logger messages from DEBUG to INFO level when they indicate important runtime behavior.
+// TODO: Add tab completions for player argument using `suggests(...)` to improve command usability.
+// TODO: Add config reload result validation—does it always succeed silently even if config is malformed?
+// TODO: Consider adding a command to preview animation frame images if relevant.
+// TODO: Add permission checks (or require OP level) to prevent abuse on public servers.
+
 package net.grapes.gea;
 
 import com.mojang.brigadier.CommandDispatcher;
