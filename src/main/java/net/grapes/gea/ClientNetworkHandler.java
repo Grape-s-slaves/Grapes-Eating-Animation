@@ -16,11 +16,17 @@ import java.util.Iterator;
 @OnlyIn(Dist.CLIENT)
 public class ClientNetworkHandler {
 
-    // Queue for delayed packet processing
     private static final ConcurrentLinkedQueue<DelayedPacket> delayedPackets = new ConcurrentLinkedQueue<>();
     private static boolean registered = false;
 
-    // Register this class to receive tick events
+    private static boolean clientFullyInitialized = false;
+    private static int initializationTicks = 0;
+    private static final int INITIALIZATION_WAIT_TICKS = 20;
+
+    private static boolean hasConnectedBefore = false;
+    private static long connectionTime = 0;
+    private static final long CONNECTION_STABILIZATION_TIME = 1000;
+
     public static void init() {
         if (!registered) {
             MinecraftForge.EVENT_BUS.register(ClientNetworkHandler.class);
@@ -34,48 +40,76 @@ public class ClientNetworkHandler {
             return;
         }
 
+        Minecraft minecraft = Minecraft.getInstance();
+
+        if (!clientFullyInitialized) {
+            initializationTicks++;
+
+            boolean hasValidWorldAndPlayer = minecraft.level != null &&
+                    minecraft.player != null &&
+                    minecraft.player.tickCount > 5;
+
+            boolean connectionStabilized = System.currentTimeMillis() - connectionTime > CONNECTION_STABILIZATION_TIME;
+
+            if (initializationTicks >= INITIALIZATION_WAIT_TICKS &&
+                    hasValidWorldAndPlayer &&
+                    connectionStabilized) {
+                clientFullyInitialized = true;
+                GrapesEatingAnimation.LOGGER.info("GEA: Client fully initialized after {} ticks (world: {}, player: {}, connection stabilized: {})",
+                        initializationTicks, minecraft.level != null, minecraft.player != null, connectionStabilized);
+            }
+        }
+
         processDelayedPackets();
     }
 
     private static void processDelayedPackets() {
+        if (delayedPackets.isEmpty()) {
+            return;
+        }
+
         Iterator<DelayedPacket> iterator = delayedPackets.iterator();
+        int processedCount = 0;
+        int droppedCount = 0;
+
         while (iterator.hasNext()) {
             DelayedPacket delayed = iterator.next();
 
-            // Increase timeout for multiplayer (network delays)
-            if (System.currentTimeMillis() - delayed.timestamp > 10000) { // 10 second timeout
+            long timeout = 10000;
+
+            if (System.currentTimeMillis() - delayed.timestamp > timeout) {
                 iterator.remove();
+                droppedCount++;
                 GrapesEatingAnimation.LOGGER.warn("GEA: Dropped delayed packet after timeout for entity {}",
                         delayed.packet.getPlayerId());
                 continue;
             }
 
-            // Try to process again
             if (handleEatingAnimationPacketInternal(delayed.packet)) {
-                iterator.remove(); // Success, remove from queue
+                iterator.remove();
+                processedCount++;
                 GrapesEatingAnimation.LOGGER.debug("GEA: Successfully processed delayed packet for entity {}",
                         delayed.packet.getPlayerId());
-            } else {
-                // Add more detailed logging for failed attempts
-                GrapesEatingAnimation.LOGGER.debug("GEA: Still waiting for entity {} (attempt age: {}ms)",
-                        delayed.packet.getPlayerId(), System.currentTimeMillis() - delayed.timestamp);
             }
+        }
+
+        if (processedCount > 0 || droppedCount > 0) {
+            GrapesEatingAnimation.LOGGER.debug("GEA: Processed {} delayed packets, dropped {} expired packets. Remaining: {}",
+                    processedCount, droppedCount, delayedPackets.size());
         }
     }
 
     public static void handleEatingAnimationPacket(NetworkHandler.EatingAnimationPacket packet) {
-        GrapesEatingAnimation.LOGGER.info("GEA: Received eating animation packet - Player: {}, Item: {}, Eating: {}",
-                packet.getPlayerId(), packet.getItemId(), packet.isEating());
+        GrapesEatingAnimation.LOGGER.debug("GEA: Received eating animation packet - Player: {}, Item: {}, Eating: {}, StartTick: {}",
+                packet.getPlayerId(), packet.getItemId(), packet.isEating(), packet.getStartTick());
 
-        if (!handleEatingAnimationPacketInternal(packet)) {
-            // If we couldn't process it immediately, queue it for later
-            delayedPackets.offer(new DelayedPacket(packet));
-            GrapesEatingAnimation.LOGGER.info("GEA: Queued packet for delayed processing (entity {} not found)",
-                    packet.getPlayerId());
-        } else {
-            GrapesEatingAnimation.LOGGER.info("GEA: Successfully processed packet immediately for entity {}",
-                    packet.getPlayerId());
+        if (handleEatingAnimationPacketInternal(packet)) {
+            return;
         }
+
+        delayedPackets.offer(new DelayedPacket(packet));
+        GrapesEatingAnimation.LOGGER.debug("GEA: Queued packet for delayed processing (client initialized: {}, entity found: {})",
+                clientFullyInitialized, findEntity(Minecraft.getInstance(), packet.getPlayerId()) != null);
     }
 
     private static class DelayedPacket {
@@ -88,48 +122,20 @@ public class ClientNetworkHandler {
         }
     }
 
-    // Add this to your ClientNetworkHandler.handleEatingAnimationPacketInternal method
     private static boolean handleEatingAnimationPacketInternal(NetworkHandler.EatingAnimationPacket packet) {
         Minecraft minecraft = Minecraft.getInstance();
 
-        GrapesEatingAnimation.LOGGER.info("GEA: [DEBUG] Processing packet - Player ID: {}, Item: {}, Eating: {}",
-                packet.getPlayerId(), packet.getItemId(), packet.isEating());
-
-        if (minecraft.level == null) {
-            GrapesEatingAnimation.LOGGER.warn("GEA: [DEBUG] Client level is null, ignoring packet");
+        if (minecraft.level == null || minecraft.player == null) {
             return false;
-        }
-
-        // Log current world state
-        GrapesEatingAnimation.LOGGER.info("GEA: [DEBUG] Current world has {} players, {} total entities",
-                minecraft.level.players().size(),
-                minecraft.level.entitiesForRendering().spliterator().estimateSize());
-
-        if (minecraft.player != null) {
-            GrapesEatingAnimation.LOGGER.info("GEA: [DEBUG] Local player ID: {}, UUID: {}",
-                    minecraft.player.getId(), minecraft.player.getUUID());
         }
 
         Entity entity = findEntity(minecraft, packet.getPlayerId());
 
         if (entity == null) {
-            GrapesEatingAnimation.LOGGER.warn("GEA: [DEBUG] Could not find entity with ID {} in client world. Available players:",
-                    packet.getPlayerId());
-
-            for (Player player : minecraft.level.players()) {
-                GrapesEatingAnimation.LOGGER.info("GEA: [DEBUG] Available player - ID: {}, Name: {}, UUID: {}",
-                        player.getId(), player.getName().getString(), player.getUUID());
-            }
-
             return false;
         }
 
-        GrapesEatingAnimation.LOGGER.info("GEA: [DEBUG] Found entity - ID: {}, Type: {}, Name: {}",
-                entity.getId(), entity.getClass().getSimpleName(),
-                entity instanceof Player ? ((Player)entity).getName().getString() : "N/A");
-
         if (!(entity instanceof Player)) {
-            GrapesEatingAnimation.LOGGER.warn("GEA: [DEBUG] Entity with ID {} is not a player", packet.getPlayerId());
             return true;
         }
 
@@ -139,93 +145,149 @@ public class ClientNetworkHandler {
             try {
                 ResourceLocation itemId = new ResourceLocation(packet.getItemId());
                 if (EatingAnimationConfig.hasAnimation(itemId)) {
+                    int adjustedStartTick = calculateAdjustedStartTick(packet, player);
+
+                    EatingAnimationHandler.clearAnimationState(player);
+
                     EatingAnimationHandler.EatingAnimationState state =
-                            new EatingAnimationHandler.EatingAnimationState(itemId, packet.getUseDuration(), packet.getStartTick());
+                            new EatingAnimationHandler.EatingAnimationState(
+                                    itemId,
+                                    packet.getUseDuration(),
+                                    adjustedStartTick,
+                                    true
+                            );
                     EatingAnimationHandler.setAnimationState(player, state);
 
-                    GrapesEatingAnimation.LOGGER.info("GEA: [DEBUG] ✓ Started eating animation for player {} with item {}",
-                            player.getName().getString(), packet.getItemId());
-                } else {
-                    GrapesEatingAnimation.LOGGER.warn("GEA: [DEBUG] No animation configured for item {}", packet.getItemId());
+                    GrapesEatingAnimation.LOGGER.debug("GEA: Started eating animation for player {} with item {} (adjusted start tick: {}, server tick: {}, current tick: {})",
+                            player.getName().getString(), packet.getItemId(), adjustedStartTick, packet.getStartTick(), player.tickCount);
                 }
             } catch (Exception e) {
-                GrapesEatingAnimation.LOGGER.error("GEA: [DEBUG] Failed to start eating animation: {}", e.getMessage(), e);
+                GrapesEatingAnimation.LOGGER.error("GEA: Failed to start eating animation: {}", e.getMessage());
             }
         } else {
             EatingAnimationHandler.clearAnimationState(player);
-            GrapesEatingAnimation.LOGGER.info("GEA: [DEBUG] ✓ Stopped eating animation for player {}",
+            GrapesEatingAnimation.LOGGER.debug("GEA: Stopped eating animation for player {}",
                     player.getName().getString());
         }
 
         return true;
     }
 
+    private static int calculateAdjustedStartTick(NetworkHandler.EatingAnimationPacket packet, Player player) {
+        int serverStartTick = packet.getStartTick();
+        int currentClientTick = player.tickCount;
+
+        int tickDifference = currentClientTick - serverStartTick;
+
+        GrapesEatingAnimation.LOGGER.debug("GEA: Tick analysis - Server: {}, Client: {}, Difference: {}",
+                serverStartTick, currentClientTick, tickDifference);
+
+        int maxAllowedDifference = 150;
+
+        if (Math.abs(tickDifference) > maxAllowedDifference) {
+            int adjustedStartTick = currentClientTick - Math.min(10, packet.getUseDuration() / 8);
+            GrapesEatingAnimation.LOGGER.debug("GEA: Large tick difference detected ({}), adjusting start tick from {} to {}",
+                    tickDifference, serverStartTick, adjustedStartTick);
+            return adjustedStartTick;
+        }
+
+        if (tickDifference < -5) {
+            int adjustedStartTick = currentClientTick - 2;
+            GrapesEatingAnimation.LOGGER.debug("GEA: Server tick in future detected, adjusting start tick from {} to {}",
+                    serverStartTick, adjustedStartTick);
+            return adjustedStartTick;
+        }
+
+        if (tickDifference > packet.getUseDuration()) {
+            int adjustedStartTick = currentClientTick - Math.min(5, packet.getUseDuration() / 4);
+            GrapesEatingAnimation.LOGGER.debug("GEA: Very old packet detected, starting short animation from tick {}",
+                    adjustedStartTick);
+            return adjustedStartTick;
+        }
+
+        return serverStartTick;
+    }
+
     private static Entity findEntity(Minecraft minecraft, int entityId) {
-        // Method 1: Direct lookup
-        try {
-            Entity entity = minecraft.level.getEntity(entityId);
-            if (entity != null) {
-                GrapesEatingAnimation.LOGGER.debug("GEA: Found entity {} via direct lookup", entityId);
-                return entity;
-            }
-        } catch (Exception e) {
-            GrapesEatingAnimation.LOGGER.debug("GEA: Direct entity lookup failed: {}", e.getMessage());
+        if (minecraft.level == null) {
+            return null;
+        }
+
+        if (minecraft.player != null && minecraft.player.getId() == entityId) {
+            return minecraft.player;
         }
 
         try {
-            if (minecraft.player != null && minecraft.player.getId() == entityId) {
-                GrapesEatingAnimation.LOGGER.debug("GEA: Entity {} is the local player", entityId);
-                return minecraft.player;
+            Entity entity = minecraft.level.getEntity(entityId);
+            if (entity != null) {
+                return entity;
             }
-        } catch (Exception e) {
-            GrapesEatingAnimation.LOGGER.debug("GEA: Local player check failed: {}", e.getMessage());
-        }
+        } catch (Exception ignored) {}
 
         try {
             for (Player player : minecraft.level.players()) {
                 if (player != null && player.getId() == entityId) {
-                    GrapesEatingAnimation.LOGGER.debug("GEA: Found entity {} through player iteration", entityId);
                     return player;
                 }
             }
-
-            if (minecraft.getConnection() != null && minecraft.getConnection().getOnlinePlayers() != null) {
-                for (var playerInfo : minecraft.getConnection().getOnlinePlayers()) {
-                    if (playerInfo.getProfile().getId().equals(minecraft.player.getGameProfile().getId())) {
-                        continue;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            GrapesEatingAnimation.LOGGER.debug("GEA: Player iteration failed: {}", e.getMessage());
-        }
+        } catch (Exception ignored) {}
 
         try {
             for (Entity entity : minecraft.level.entitiesForRendering()) {
                 if (entity != null && entity.getId() == entityId && entity instanceof Player) {
-                    GrapesEatingAnimation.LOGGER.debug("GEA: Found entity {} through entity iteration", entityId);
                     return entity;
                 }
             }
-        } catch (Exception e) {
-            GrapesEatingAnimation.LOGGER.debug("GEA: Entity iteration failed: {}", e.getMessage());
-        }
+        } catch (Exception ignored) {}
 
-        try {
-            if (minecraft.level instanceof net.minecraft.client.multiplayer.ClientLevel) {
-                net.minecraft.client.multiplayer.ClientLevel clientLevel = (net.minecraft.client.multiplayer.ClientLevel) minecraft.level;
-                for (Entity entity : clientLevel.entitiesForRendering()) {
-                    if (entity instanceof Player && entity.getId() == entityId) {
-                        GrapesEatingAnimation.LOGGER.debug("GEA: Found player {} in client level", entityId);
-                        return entity;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            GrapesEatingAnimation.LOGGER.debug("GEA: ClientLevel search failed: {}", e.getMessage());
-        }
-
-        GrapesEatingAnimation.LOGGER.warn("GEA: Could not find entity with ID {} after all lookup methods", entityId);
         return null;
+    }
+
+    public static void resetInitializationState() {
+        clientFullyInitialized = false;
+        initializationTicks = 0;
+        connectionTime = System.currentTimeMillis();
+        hasConnectedBefore = true;
+
+        GrapesEatingAnimation.LOGGER.debug("GEA: Reset client initialization state (keeping {} delayed packets)",
+                delayedPackets.size());
+    }
+
+    @SubscribeEvent
+    public static void onPlayerJoinWorld(net.minecraftforge.event.entity.EntityJoinLevelEvent event) {
+        if (event.getEntity() instanceof Player) {
+            Player player = (Player) event.getEntity();
+            Minecraft minecraft = Minecraft.getInstance();
+
+            if (player == minecraft.player) {
+                resetInitializationState();
+                GrapesEatingAnimation.LOGGER.info("GEA: Local player joined world, reset initialization state");
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public static void onPlayerLeaveWorld(net.minecraftforge.event.entity.EntityLeaveLevelEvent event) {
+        if (event.getEntity() instanceof Player) {
+            Player player = (Player) event.getEntity();
+            Minecraft minecraft = Minecraft.getInstance();
+
+            if (player == minecraft.player) {
+                delayedPackets.clear();
+                clientFullyInitialized = false;
+                GrapesEatingAnimation.LOGGER.info("GEA: Local player left world, cleared state");
+            }
+        }
+    }
+
+    public static void forceInitialization() {
+        clientFullyInitialized = true;
+        GrapesEatingAnimation.LOGGER.info("GEA: Forced client initialization");
+    }
+    
+    public static String getDebugInfo() {
+        return String.format("ClientNetworkHandler{initialized=%s, ticks=%d, delayedPackets=%d, hasConnectedBefore=%s, timeSinceConnection=%d}",
+                clientFullyInitialized, initializationTicks, delayedPackets.size(), hasConnectedBefore,
+                System.currentTimeMillis() - connectionTime);
     }
 }

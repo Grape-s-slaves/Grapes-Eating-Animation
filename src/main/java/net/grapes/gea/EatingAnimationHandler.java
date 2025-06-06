@@ -29,7 +29,7 @@ public class EatingAnimationHandler {
     @SubscribeEvent
     public void onRenderHand(RenderHandEvent event) {
         Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player == null) {
+        if (minecraft.player == null || minecraft.level == null) {
             return;
         }
 
@@ -39,6 +39,11 @@ public class EatingAnimationHandler {
 
     public static void updateAnimationState(Player player) {
         if (player == null) {
+            return;
+        }
+
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.level == null) {
             return;
         }
 
@@ -73,22 +78,31 @@ public class EatingAnimationHandler {
             return;
         }
 
-        EatingAnimationState state = activeAnimations.computeIfAbsent(player,
-                k -> {
+        boolean isLocalPlayer = (minecraft.player == player);
+
+        if (isLocalPlayer || minecraft.hasSingleplayerServer()) {
+            EatingAnimationState existingState = activeAnimations.get(player);
+
+            if (existingState == null || !existingState.isValidForItem(itemId)) {
+                if (activeAnimations.size() >= MAX_ANIMATION_STATES) {
+                    performEnhancedCleanup();
+
                     if (activeAnimations.size() >= MAX_ANIMATION_STATES) {
-                        performEnhancedCleanup();
-
-                        if (activeAnimations.size() >= MAX_ANIMATION_STATES) {
-                            removeOldestAnimation();
-                        }
+                        removeOldestAnimation();
                     }
+                }
 
-                    GrapesEatingAnimation.LOGGER.info("GEA: Starting new eating animation for {} (duration: {})",
-                            itemId, activeItem.getUseDuration());
-                    return new EatingAnimationState(itemId, activeItem.getUseDuration(), player.tickCount);
-                });
+                GrapesEatingAnimation.LOGGER.info("GEA: Starting new eating animation for {} (duration: {})",
+                        itemId, activeItem.getUseDuration());
 
-        state.update(player);
+                EatingAnimationState newState = new EatingAnimationState(itemId, activeItem.getUseDuration(), player.tickCount);
+                activeAnimations.put(player, newState);
+            }
+
+            if (existingState != null) {
+                existingState.update(player);
+            }
+        }
     }
 
     private static void removeOldestAnimation() {
@@ -145,6 +159,8 @@ public class EatingAnimationHandler {
                     ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(currentItem.getItem());
                     if (itemId == null || !EatingAnimationConfig.hasAnimation(itemId)) {
                         shouldRemove = true;
+                    } else if (!state.isValidForItem(itemId)) {
+                        shouldRemove = true;
                     }
                 }
             }
@@ -166,14 +182,25 @@ public class EatingAnimationHandler {
     }
 
     public static void setAnimationState(Player player, EatingAnimationState state) {
+        if (player == null || state == null) {
+            return;
+        }
+
         if (activeAnimations.size() >= MAX_ANIMATION_STATES) {
             performEnhancedCleanup();
         }
+
         activeAnimations.put(player, state);
+        GrapesEatingAnimation.LOGGER.debug("GEA: Set animation state for player {} with start tick {} for item {}",
+                player.getName().getString(), state.startTickCount, state.itemId);
     }
 
     public static void clearAnimationState(Player player) {
-        activeAnimations.remove(player);
+        EatingAnimationState removed = activeAnimations.remove(player);
+        if (removed != null) {
+            GrapesEatingAnimation.LOGGER.debug("GEA: Cleared animation state for player {}",
+                    player.getName().getString());
+        }
     }
 
     public static AnimationStats getAnimationStats() {
@@ -205,19 +232,27 @@ public class EatingAnimationHandler {
         private final int startTickCount;
         private final long creationTime;
         private String lastFrame = null;
+        private final boolean useServerTick;
+        private final String itemId;
 
-        public EatingAnimationState(ResourceLocation itemId, int useDuration, int startTick) {
+        public EatingAnimationState(ResourceLocation itemId, int useDuration, int serverStartTick, boolean useServerTick) {
             this.frames = EatingAnimationConfig.getAnimationFrames(itemId);
             this.totalDurationTicks = useDuration;
-            this.startTickCount = startTick;
+            this.startTickCount = serverStartTick;
             this.creationTime = System.currentTimeMillis();
+            this.useServerTick = useServerTick;
+            this.itemId = itemId.toString();
 
-            GrapesEatingAnimation.LOGGER.info("GEA: Animation state created - {} frames, {} total duration",
-                    frames != null ? frames.size() : 0, totalDurationTicks);
+            GrapesEatingAnimation.LOGGER.info("GEA: Animation state created - {} frames, {} total duration, server tick: {}, use server tick: {}, item: {}",
+                    frames != null ? frames.size() : 0, totalDurationTicks, serverStartTick, useServerTick, this.itemId);
+        }
+
+        public EatingAnimationState(ResourceLocation itemId, int useDuration, int startTick) {
+            this(itemId, useDuration, startTick, false);
         }
 
         public EatingAnimationState(ResourceLocation itemId, int useDuration) {
-            this(itemId, useDuration, getClientPlayerTickCount());
+            this(itemId, useDuration, getClientPlayerTickCount(), false);
         }
 
         private static int getClientPlayerTickCount() {
@@ -227,6 +262,10 @@ public class EatingAnimationHandler {
 
         public void update(Player player) {
             // Just reminder
+        }
+
+        public boolean isValidForItem(ResourceLocation itemId) {
+            return itemId != null && itemId.toString().equals(this.itemId);
         }
 
         public String getCurrentFrame(Player player) {
@@ -239,15 +278,28 @@ public class EatingAnimationHandler {
             }
 
             int currentTick = player.tickCount;
-            int elapsedTicks = currentTick - startTickCount;
-            elapsedTicks = Math.min(elapsedTicks, totalDurationTicks);
+            int elapsedTicks;
+
+            if (useServerTick) {
+                elapsedTicks = Math.max(0, currentTick - startTickCount);
+
+                if (elapsedTicks < 0) {
+                    GrapesEatingAnimation.LOGGER.debug("GEA: Negative elapsed ticks detected, using 0. Current: {}, Start: {}",
+                            currentTick, startTickCount);
+                    elapsedTicks = 0;
+                }
+            } else {
+                elapsedTicks = currentTick - startTickCount;
+            }
+
+            elapsedTicks = Math.max(0, Math.min(elapsedTicks, totalDurationTicks - 1));
 
             int currentFrameIndex = calculateFrameIndex(elapsedTicks);
             String frame = frames.get(currentFrameIndex);
 
             if (!frame.equals(lastFrame)) {
-                GrapesEatingAnimation.LOGGER.debug("GEA: Animation frame changed to: {} (index: {}, elapsed ticks: {})",
-                        frame, currentFrameIndex, elapsedTicks);
+                GrapesEatingAnimation.LOGGER.debug("GEA: Animation frame changed to: {} (index: {}, elapsed ticks: {}, start: {}, current: {}, server mode: {})",
+                        frame, currentFrameIndex, elapsedTicks, startTickCount, currentTick, useServerTick);
                 lastFrame = frame;
             }
 
@@ -259,9 +311,16 @@ public class EatingAnimationHandler {
                 return 0;
             }
 
+            if (totalDurationTicks <= 1) {
+                return frames.size() - 1;
+            }
+
             elapsedTicks = Math.max(0, Math.min(elapsedTicks, totalDurationTicks - 1));
+
             int frameIndex = (elapsedTicks * frames.size()) / totalDurationTicks;
-            return Math.min(frameIndex, frames.size() - 1);
+            frameIndex = Math.min(frameIndex, frames.size() - 1);
+
+            return frameIndex;
         }
 
         public String getCurrentFrame() {
@@ -274,7 +333,9 @@ public class EatingAnimationHandler {
                 return true;
             }
 
-            int elapsedTicks = player.tickCount - startTickCount;
+            int elapsedTicks = useServerTick ?
+                    Math.max(0, player.tickCount - startTickCount) :
+                    player.tickCount - startTickCount;
             return elapsedTicks >= totalDurationTicks;
         }
 
@@ -304,7 +365,10 @@ public class EatingAnimationHandler {
             if (player == null) {
                 return 0;
             }
-            return Math.max(0, player.tickCount - startTickCount);
+            int elapsed = useServerTick ?
+                    Math.max(0, player.tickCount - startTickCount) :
+                    player.tickCount - startTickCount;
+            return Math.max(0, elapsed);
         }
 
         public int getElapsedTicks() {
@@ -312,8 +376,24 @@ public class EatingAnimationHandler {
             return getElapsedTicks(minecraft.player);
         }
 
+        public boolean isValidForMultiplayer(Player player) {
+            if (player == null) return false;
+
+            int elapsedTicks = getElapsedTicks(player);
+
+            if (elapsedTicks < 0 || elapsedTicks > totalDurationTicks + 40) {
+                return false;
+            }
+
+            return true;
+        }
+
         public long getCreationTime() {
             return creationTime;
+        }
+
+        public String getItemId() {
+            return itemId;
         }
     }
 }
