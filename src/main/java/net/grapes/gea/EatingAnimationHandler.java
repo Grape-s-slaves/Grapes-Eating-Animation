@@ -1,3 +1,12 @@
+// TODO: Replace `Player` key with `UUID` in activeAnimations to prevent identity issues.
+// TODO: Implement or remove empty `update(Player)` method in EatingAnimationState.
+// TODO: Reduce repetitive clamping logic for ticks by adding a helper method.
+// TODO: Consider caching config checks like `EatingAnimationConfig.hasAnimation()`.
+// TODO: Avoid over-logging per-frame changes unless debugging.
+// TODO: Evaluate whether enhanced cleanup should run more/less frequently.
+// TODO: Consider removing redundant `null` checks for `player` and `minecraft.level` in `onRenderHand()`.
+// TODO: (Optional) Add unit tests for stale/expired logic for robustness.
+
 package net.grapes.gea;
 
 import net.minecraft.client.Minecraft;
