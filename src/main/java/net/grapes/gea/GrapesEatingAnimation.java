@@ -1,3 +1,11 @@
+// TODO: Consider using DistExecutor.safeRunWhenOn for client-side setup to improve safety.
+// TODO: Ensure EatingAnimationConfig.reloadConfig() is thread-safe or reroute it to the main thread.
+// TODO: Return a proper CompletableFuture<Void> in the reload listener to indicate full completion.
+// TODO: Downgrade LOGGER.info calls to LOGGER.debug if they are too verbose for production.
+// TODO: Clarify the role of the mod class – rename GrapesEatingAnimation to GrapesEatingAnimationMod or similar for clarity.
+// TODO: Audit config loading – avoid redundant or conflicting reloads between config registration and manual reloads.
+// TODO: Consider annotating client-only event handlers with @EventBusSubscriber if applicable, to simplify registration.
+
 package net.grapes.gea;
 
 import net.minecraftforge.api.distmarker.Dist;
